@@ -1,0 +1,19 @@
+#### Trim R2 to 16 bp:
+~/TrimGalore-0.6.6/trim_galore --hardtrim5 16 -o /nfs/lab/projects/pbmc_snATAC/data/new_samples_combined/trimmed /nfs/lab/projects/pbmc_snATAC/data/snATAC/PBMC13/MM_624_2_S1_L001_R2_001.fastq.gz
+
+#### Combine all fastq in the same directory and remove the I1 files
+
+
+#### Make new reference for hg19 with this config file:
+cellranger-atac-2.0.0/cellranger-atac mkref --config=hg19.v2
+{
+    organism: "human"
+    genome: ["hg19v2"]
+    input_fasta: ["/nfs/lab/projects/pbmc_snATAC/scripts/refdata-cellranger-atac-hg19-1.1.0/fasta/genome.fa"]
+    input_gtf: ["/nfs/lab/projects/pbmc_snATAC/scripts/refdata-cellranger-atac-hg19-1.1.0/genes/genes.gtf"]
+    non_nuclear_contigs: ["chrM"]
+}
+
+### Run cellranger:
+
+/nfs/lab/projects/pbmc_snATAC/scripts/cellranger-atac-2.0.0/cellranger-atac count --id=PBMC13 --fastqs=/nfs/lab/projects/pbmc_snATAC/data/snATAC/PBMC13 --sample=MM_624,MM_624_2 --reference=/nfs/lab/projects/pbmc_snATAC/scripts/hg19v2 --localcores=16
