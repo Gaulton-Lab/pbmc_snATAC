@@ -1,0 +1,107 @@
+#### Topmed reference file ####
+## downloaded from here:https://bravo.sph.umich.edu/freeze8/hg38/downloads#
+## tabix
+## bcftools concat -f vcf.list -Oz -o ALL.BRAVO_TOPMed_Freeze_8.vcf.gz
+./CreateTOPMed.pl -i /nfs/lab/TOPMedFreeze8_dbSNP/ALL.BRAVO_TOPMed_Freeze_8.vcf.gz #### Long step
+#Input File:  /nfs/lab/TOPMedFreeze8_dbSNP/ALL.BRAVO_TOPMed_Freeze_8.vcf.gz
+#Output File: /nfs/lab/TOPMedFreeze8_dbSNP/PASS.Variants.BRAVO_TOPMed_Freeze_8.tab.gz
+##### for HG19/HRC
+/home/joshchiou/references/HRC.r1-1.GRCh37.wgs.mac5.sites.tab
+#### Rename and make binary files from the two GenomeStudio outputs
+#### Array versions = Infinium Omni2.5-8 old_pbmc = v1.4, new_pbmc= v1.5
+plink \
+  -file new_pbmc \
+  --make-bed \
+  --out new_pbmc_updated_ids \
+  --recode \
+  --update-ids new_ids.txt
+plink \
+  -file old_pbmc \
+  --make-bed \
+  --out old_pbmc_updated_ids \
+  --recode \
+  --update-ids new_ids.txt
+
+#############
+### Find instersecting snps between the two batches and merge
+awk ‘{print $2}’ old_pbmc_updated_ids.bim | sort > old_pbmc_hg38_snps.txt
+awk ‘{print $2}’ new_pbmc_updated_ids.bim | sort > new_pbmc_hg38_snps.txt
+comm -12 old_pbmc_hg38_snps.txt new_pbmc_hg38_snps.txt > intersecting_snps_old_new.txt
+### Merge the two batches keeping only intersecting snps
+plink --bfile old_pbmc_updated_ids --bmerge new_pbmc_updated_ids.bed new_pbmc_updated_ids.bim new_pbmc_updated_ids.fam --make-bed --extract intersecting_snps_old_new.txt --out all_pbmc_hg38
+################################
+#### Follow the steps in https://topmedimpute.readthedocs.io/en/latest/prepare-your-data.html
+#### Execute the pre imputation check using Will Rayner code (Version 4.3.0) using the HRC reference panel
+plink --freq --bfile all_pbmc_hg38 --out all_pbmc_hg38
+perl HRC-1000G-check-bim.pl -b all_pbmc_hg38.bim -f all_pbmc_hg38.frq -r /nfs/lab/TOPMedFreeze8_dbSNP/PASS.Variants.BRAVO_TOPMed_Freeze_8.tab.gz -h -t 0.4
+sh Run-plink.sh
+for ch in {1..22}; do bcftools annotate all_pbmc_hg38-updated-chr$ch.vcf --rename-chrs chr.map.file -Oz -o all_pbmc_hg38-chrnames-chr$ch.vcf.gz; done
+
+###upload to the imputation server###
+
+
+###### POST-IMPUTATION ########
+#### download results and unzip
+for ch in {1..22}; do unzip -P q0IqCARTGqb9x chr_$ch.zip; done
+rm *.zip
+
+for ch in {1..22}; do zcat chr$ch.info.gz | tail -n +2 ; echo; done > all_chrs_topmend_info.txt
+zcat chr2.info.gz | head -n 1 > header.txt
+cat header.txt all_chrs_topmend_info.txt > all_vars_topmend_imputation_info.txt
+rm *info.gz
+rm all_chrs_topmend_info.txt
+sed -i -e 's/-ch/-\nch/g' all_vars_topmend_imputation_info_test.txt
+
+
+#### Liftover to hg19
+for ch in {1..22};
+do 
+java -jar /nfs/lab/picard/picard.jar LiftoverVcf \
+I=chr$ch.dose.vcf.gz  \
+O=chr$ch.dose.hg19.vcf.gz  \
+CHAIN=/nfs/lab/liftOver/hg38ToHg19.over.chain.gz \
+REJECT=chr$ch.liftover_rejected_variants.vcf \
+WARN_ON_MISSING_CONTIG=true \
+R=/home/joshchiou/references/male.hg19.fa
+done
+###remove the variants that map to different chromosomes after liftOver and rename ids
+
+for ch in {1..22}; do bcftools view chr$ch.dose.hg19.vcf.gz --regions chr$ch -Oz -o chr$ch.topmed_imputed.hg19.vcf.gz; done
+
+for ch in {1..22}; do bcftools annotate --set-id '%CHROM:%POS:%REF:%ALT' chr$ch.topmed_imputed.hg19.vcf.gz -Oz -o chr$ch.topmed_imputed.hg19.final.vcf.gz; done
+
+rm *.topmed_imputed.hg19.vcf.gz
+rm *.dose.hg19.vcf.gz
+rm *.dose.hg19.vcf.gz.tbi 
+
+for ch in {1..22}; do bcftools view --samples-file pbmc_samples chr$ch.topmed_imputed.hg19.final.vcf.gz -Oz -o chr$ch.PBMC.topmed.hg19.vcf.gz; done
+for ch in {1..22}; do bcftools reheader --samples samples_subset chr$ch.PBMC.topmed.hg19.vcf.gz -o chr$ch.PBMC.topmed.hg19.final.vcf.gz; done
+###final_vcfs folder
+for ch in {1..22}; do tabix chr$ch.PBMC.topmed.hg19.final.vcf.gz; done
+
+###### PCA ########
+########################
+## liftover the non-imputed
+for ch in {1..22}; do tabix all_pbmc_hg38-chrnames-chr$ch.vcf.gz; done
+for ch in {1..22}; do echo all_pbmc_hg38-chrnames-chr$ch.vcf.gz; done > input_vcf_list
+bcftools concat -f input_vcf_list -o All_pbmc_hg38-chrnames.vcf
+bcftools annotate All_pbmc_hg38-chrnames.vcf --rename-chrs chr.map.file.rev > All_pbmc_hg38-chrnumb.vcf
+java -jar /nfs/lab/picard/picard.jar LiftoverVcf \
+I=All_pbmc_hg38-chrnames.vcf \
+O=All_pbmc_hg19_lifted_over.vcf \
+CHAIN=/nfs/lab/liftOver/hg38ToHg19.over.chain.gz \
+REJECT=liftover_rejected_variants.vcf \
+WARN_ON_MISSING_CONTIG=true \
+R=/home/joshchiou/references/male.hg19.fa
+## note plink2 in sherlock not gatsby
+plink2 --vcf All_pbmc_hg19_lifted_over.vcf --make-bed --set-all-var-ids @:#:\$r:\$a --out All_pbmc_hg19_chrpos
+awk ‘{print $2}’ All_pbmc_hg19_chrpos.bim | sort > All_pbmc_hg19_chrpos_snps.txt
+awk ‘{print $2}’ 1KGP_ALL.merged.bim | sort > 1KGP_ALL.merged_snps.txt
+comm -12 All_pbmc_hg19_chrpos_snps.txt 1KGP_ALL.merged_snps.txt > intersecting_snps_pbmc_1kg.txt
+plink --bfile 1KGP_ALL.merged --exclude 1KGP_ALL.merged.dupvars  --extract intersecting_snps_pbmc_1kg.txt --indep 50 5 2 --maf .01 --make-bed --out 1KGP_ALL.merged.subset
+plink --bfile 1KGP_ALL.merged.subset --extract intersecting_snps_pbmc_1kg.txt --bmerge All_pbmc_hg19_chrpos.bed All_pbmc_hg19_chrpos.bim All_pbmc_hg19_chrpos.fam --make-bed --out all_pbmc_1KGP
+plink --bfile all_pbmc_1KGP \
+  --extract 1KGP_ALL.merged.subset.prune.in \
+  --out all_pbmc_1KGP_ALL_HRC \
+  --pca tabs header
+################################################
