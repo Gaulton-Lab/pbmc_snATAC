@@ -1,6 +1,7 @@
 # pbmc_snATAC
-Repository for codes and notebooks used to perform caQTL mapping from PBMC snATAC-seq\
-Current preprint: https://www.biorxiv.org/content/10.1101/2020.12.03.387894v1\
+Repository for codes and notebooks used to perform caQTL mapping from PBMC snATAC-seq
+
+Publication: https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1010759
 
 Data available at: https://doi.org/10.5281/zenodo.7375095
 
